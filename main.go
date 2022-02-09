@@ -1,34 +1,42 @@
 package main
 
 import (
+	"context"
 	"github.com/anvouk/veryfreshpod/app"
-	"github.com/kelseyhightower/envconfig"
-	"go.uber.org/zap"
-	"log"
+	"os"
+	"os/signal"
+	"syscall"
 )
 
 func main() {
-	// read env vars config
-	var config app.Config
-	if err := envconfig.Process("VFP", &config); err != nil {
-		log.Fatalf("failed parsing env vars: %v", err)
-	}
+	config := app.NewConfig()
+	logger := app.NewSugaredLogger(config)
 
-	// create zap logger (core)
-	var baseLogger *zap.Logger
-	var err error
-	if config.Debug {
-		baseLogger, err = zap.NewDevelopment()
-	} else {
-		baseLogger, err = zap.NewProduction()
-	}
+	logger.Infof("veryfreshpod starting")
+	logger.Infof("debug mode: %v", config.Debug)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		signalChan := make(chan os.Signal, 1)
+		signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
+		sig := <-signalChan
+		logger.Infof("received signal: %v", sig.String())
+		cancel()
+	}()
+
+	k8s, err := app.NewK8sClient(logger)
 	if err != nil {
-		log.Fatalf("failed creating zap logger: %v", err)
+		logger.Fatalw("failed creating k8s client", err)
 	}
-	defer baseLogger.Sync()
 
-	// cretate zap logger (pretty)
-	logger := baseLogger.Sugar()
+	if err := k8s.IsClusterVersionSupported(); err != nil {
+		logger.Fatalf("unsupported k8s version or connection failure: %v", err)
+	}
 
-	logger.Infof("Debug %v!", config.Debug)
+	docker, err := app.NewDockerClient(logger)
+	if err != nil {
+		logger.Fatalw("failed creating docker client", err)
+	}
+
+	docker.NegotiateVersion(ctx)
 }
