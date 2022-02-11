@@ -5,13 +5,24 @@ import (
 	"log"
 )
 
+func getLoggerEncoding(config *Config) string {
+	if config.LoggerUseJson {
+		return "json"
+	}
+	return "console"
+}
+
 func NewSugaredLogger(config *Config) *zap.SugaredLogger {
 	var baseLogger *zap.Logger
 	var err error
 	if config.Debug {
-		baseLogger, err = zap.NewDevelopment()
+		devConfig := zap.NewDevelopmentConfig()
+		devConfig.Encoding = getLoggerEncoding(config)
+		baseLogger, err = devConfig.Build()
 	} else {
-		baseLogger, err = zap.NewProduction()
+		prodConfig := zap.NewProductionConfig()
+		prodConfig.Encoding = getLoggerEncoding(config)
+		baseLogger, err = prodConfig.Build()
 	}
 	if err != nil {
 		log.Fatalf("failed creating zap logger: %v", err)

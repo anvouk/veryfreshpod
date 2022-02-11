@@ -8,23 +8,29 @@ import (
 )
 
 type Docker struct {
-	client *client.Client
 	logger *zap.SugaredLogger
+	client *client.Client
 }
 
-func NewDockerClient(logger *zap.SugaredLogger) (*Docker, error) {
+func NewDockerClient(logger *zap.SugaredLogger, ctx context.Context) (*Docker, error) {
+	namedLogger := logger.Named("docker")
 	dockerClient, err := client.NewClientWithOpts(client.FromEnv)
 	if err != nil {
 		return nil, fmt.Errorf("failed connecting to docker, is docker available?, %v", err)
 	}
 
-	docker := &Docker{
-		client: dockerClient,
-		logger: logger.Named("docker"),
+	ver, err := dockerClient.ServerVersion(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed detecting docker version: %v", err)
 	}
-	return docker, nil
-}
+	namedLogger.Infof("connected to docker: %v", ver.Version)
 
-func (d *Docker) NegotiateVersion(ctx context.Context) {
-	d.client.NegotiateAPIVersion(ctx)
+	dockerClient.NegotiateAPIVersion(ctx)
+
+	docker := &Docker{
+		logger: namedLogger,
+		client: dockerClient,
+	}
+
+	return docker, nil
 }

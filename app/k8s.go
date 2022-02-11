@@ -4,8 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"go.uber.org/zap"
+	"k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/cache"
 	"os"
 	"strconv"
 )
@@ -22,6 +25,7 @@ func isInsideCluster() bool {
 }
 
 func NewK8sClient(logger *zap.SugaredLogger) (*K8s, error) {
+	namedLogger := logger.Named("k8s")
 	if !isInsideCluster() {
 		return nil, errors.New("usage outside of a k8s cluster is not supported at the moment")
 	}
@@ -31,14 +35,20 @@ func NewK8sClient(logger *zap.SugaredLogger) (*K8s, error) {
 		return nil, fmt.Errorf("failed to load in-cluster config: %v", err)
 	}
 
-	clientset, err := kubernetes.NewForConfig(config)
+	k8sClient, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed creating new k8s client: %v", err)
 	}
 
+	ver, err := k8sClient.ServerVersion()
+	if err != nil {
+		return nil, fmt.Errorf("failed detecting k8s version: %v", err)
+	}
+	namedLogger.Infof("connected to k8s: %v.%v", ver.Major, ver.Minor)
+
 	client := &K8s{
-		client: clientset,
-		logger: logger.Named("k8s"),
+		logger: namedLogger,
+		client: k8sClient,
 	}
 
 	return client, nil
@@ -59,4 +69,32 @@ func (k8s *K8s) IsClusterVersionSupported() error {
 		return fmt.Errorf("detected unsupported k8s version '%v'", intMin)
 	}
 	return nil
+}
+
+func (k8s *K8s) WatchPodsForChanges(config *Config) cache.Controller {
+	restClient := k8s.client.CoreV1().RESTClient()
+	lw := cache.NewListWatchFromClient(restClient, "pods", v1.NamespaceAll, fields.Everything())
+	_, controller := cache.NewInformer(lw,
+		&v1.Pod{},
+		config.RefreshInterval,
+		cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				pod, ok := obj.(*v1.Pod)
+				if !ok {
+					k8s.logger.Errorw("failed watch on add pod", "error", obj)
+					return
+				}
+				k8s.logger.Infow("pod added", "pod", pod.Name, "namespace", pod.Namespace)
+			},
+			DeleteFunc: func(obj interface{}) {
+				pod, ok := obj.(*v1.Pod)
+				if !ok {
+					k8s.logger.Errorw("failed watch on remove pod", "error", obj)
+					return
+				}
+				k8s.logger.Infow("pod removed", "pod", pod.Name, "namespace", pod.Namespace)
+			},
+		},
+	)
+	return controller
 }

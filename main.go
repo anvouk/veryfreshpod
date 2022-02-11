@@ -26,17 +26,18 @@ func main() {
 
 	k8s, err := app.NewK8sClient(logger)
 	if err != nil {
-		logger.Fatalw("failed creating k8s client", err)
+		logger.Fatalw("failed creating k8s client", "error", err)
 	}
 
 	if err := k8s.IsClusterVersionSupported(); err != nil {
-		logger.Fatalf("unsupported k8s version or connection failure: %v", err)
+		logger.Fatalw("unsupported k8s version or connection failure", "error", err)
 	}
 
-	docker, err := app.NewDockerClient(logger)
+	_, err = app.NewDockerClient(logger, ctx)
 	if err != nil {
-		logger.Fatalw("failed creating docker client", err)
+		logger.Fatalw("failed creating docker client", "error", err)
 	}
 
-	docker.NegotiateVersion(ctx)
+	controller := k8s.WatchPodsForChanges(config)
+	controller.Run(ctx.Done())
 }
