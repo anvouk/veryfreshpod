@@ -1,11 +1,12 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"go.uber.org/zap"
-	"k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/fields"
+	appsV1 "k8s.io/api/apps/v1"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
@@ -18,6 +19,16 @@ const minSupportedVersionMinor int = 20
 type K8s struct {
 	logger *zap.SugaredLogger
 	client *kubernetes.Clientset
+
+	coreInformers informers.SharedInformerFactory
+}
+
+type K8sWatcher struct {
+	OnAddDeployment    func(deployment *appsV1.Deployment)
+	OnRemoveDeployment func(deployment *appsV1.Deployment)
+
+	OnAddStatefulSet    func(statefulSet *appsV1.StatefulSet)
+	OnRemoveStatefulSet func(statefulSet *appsV1.StatefulSet)
 }
 
 func isInsideCluster() bool {
@@ -47,8 +58,9 @@ func NewK8sClient(logger *zap.SugaredLogger) (*K8s, error) {
 	namedLogger.Infof("connected to k8s: %v.%v", ver.Major, ver.Minor)
 
 	client := &K8s{
-		logger: namedLogger,
-		client: k8sClient,
+		logger:        namedLogger,
+		client:        k8sClient,
+		coreInformers: nil,
 	}
 
 	return client, nil
@@ -71,30 +83,74 @@ func (k8s *K8s) IsClusterVersionSupported() error {
 	return nil
 }
 
-func (k8s *K8s) WatchPodsForChanges(config *Config) cache.Controller {
-	restClient := k8s.client.CoreV1().RESTClient()
-	lw := cache.NewListWatchFromClient(restClient, "pods", v1.NamespaceAll, fields.Everything())
-	_, controller := cache.NewInformer(lw,
-		&v1.Pod{},
-		config.RefreshInterval,
-		cache.ResourceEventHandlerFuncs{
-			AddFunc: func(obj interface{}) {
-				pod, ok := obj.(*v1.Pod)
-				if !ok {
-					k8s.logger.Errorw("failed watch on add pod", "error", obj)
-					return
-				}
-				k8s.logger.Infow("pod added", "pod", pod.Name, "namespace", pod.Namespace)
-			},
-			DeleteFunc: func(obj interface{}) {
-				pod, ok := obj.(*v1.Pod)
-				if !ok {
-					k8s.logger.Errorw("failed watch on remove pod", "error", obj)
-					return
-				}
-				k8s.logger.Infow("pod removed", "pod", pod.Name, "namespace", pod.Namespace)
-			},
+// RegisterWatchForChanges watches k8s resources for added or removed pods
+func (k8s *K8s) RegisterWatchForChanges(config *Config, watcher *K8sWatcher) error {
+	if watcher == nil {
+		return errors.New("invalid arg: watcher is nil")
+	}
+
+	coreInformers := informers.NewSharedInformerFactory(k8s.client, config.RefreshInterval)
+
+	// Deployments
+	coreInformers.Apps().V1().Deployments().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			deployment, ok := obj.(*appsV1.Deployment)
+			if !ok {
+				k8s.logger.Errorf("failed cast on k8s resource: %T", deployment)
+				return
+			}
+			if watcher.OnAddDeployment != nil {
+				watcher.OnAddDeployment(deployment)
+			}
 		},
-	)
-	return controller
+		DeleteFunc: func(obj interface{}) {
+			deployment, ok := obj.(*appsV1.Deployment)
+			if !ok {
+				k8s.logger.Errorf("failed cast on k8s resource: %T", deployment)
+				return
+			}
+			if watcher.OnRemoveDeployment != nil {
+				watcher.OnRemoveDeployment(deployment)
+			}
+		},
+	})
+
+	// StatefulSets
+	coreInformers.Apps().V1().StatefulSets().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			statefulSet, ok := obj.(*appsV1.StatefulSet)
+			if !ok {
+				k8s.logger.Errorf("failed cast on k8s resource: %T", statefulSet)
+				return
+			}
+			if watcher.OnAddStatefulSet != nil {
+				watcher.OnAddStatefulSet(statefulSet)
+			}
+		},
+		DeleteFunc: func(obj interface{}) {
+			statefulSet, ok := obj.(*appsV1.StatefulSet)
+			if !ok {
+				k8s.logger.Errorf("failed cast on k8s resource: %T", statefulSet)
+				return
+			}
+			if watcher.OnRemoveStatefulSet != nil {
+				watcher.OnRemoveStatefulSet(statefulSet)
+			}
+		},
+	})
+
+	k8s.coreInformers = coreInformers
+	return nil
+}
+
+func (k8s *K8s) Run(ctx context.Context) error {
+	if k8s.coreInformers == nil {
+		return errors.New("no watchers registered. Call RegisterWatchForChanges before running")
+	}
+
+	stopCh := ctx.Done()
+	k8s.coreInformers.WaitForCacheSync(stopCh)
+	k8s.coreInformers.Start(stopCh)
+
+	return nil
 }

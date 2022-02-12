@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"github.com/anvouk/veryfreshpod/app"
+	appsV1 "k8s.io/api/apps/v1"
 	"os"
 	"os/signal"
 	"syscall"
@@ -38,6 +39,37 @@ func main() {
 		logger.Fatalw("failed creating docker client", "error", err)
 	}
 
-	controller := k8s.WatchPodsForChanges(config)
-	controller.Run(ctx.Done())
+	if err := k8s.RegisterWatchForChanges(config, &app.K8sWatcher{
+		OnAddDeployment: func(deployment *appsV1.Deployment) {
+			logger.Infow("added deployment",
+				"name", deployment.Name, "namespace", deployment.Namespace)
+			containers := deployment.Spec.Template.Spec.Containers
+			for _, container := range containers {
+				logger.Infow("found images", "image", container.Image, "name", container.Name)
+			}
+		},
+		OnRemoveDeployment: func(deployment *appsV1.Deployment) {
+			logger.Infow("removed deployment",
+				"name", deployment.Name, "namespace", deployment.Namespace)
+		},
+		OnAddStatefulSet: func(statefulSet *appsV1.StatefulSet) {
+			logger.Infow("added deployment",
+				"name", statefulSet.Name, "namespace", statefulSet.Namespace)
+			containers := statefulSet.Spec.Template.Spec.Containers
+			for _, container := range containers {
+				logger.Infow("found images", "image", container.Image, "name", container.Name)
+			}
+		},
+		OnRemoveStatefulSet: func(statefulSet *appsV1.StatefulSet) {
+			logger.Infow("removed statefulSet",
+				"name", statefulSet.Name, "namespace", statefulSet.Namespace)
+		},
+	}); err != nil {
+		logger.Fatalw("failed registering callbacks for k8s watcher", "error", err)
+	}
+
+	if err := k8s.Run(ctx); err != nil {
+		logger.Fatalw("failed listening for k8s changes", "error", err)
+	}
+	<-ctx.Done()
 }
