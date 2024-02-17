@@ -8,7 +8,6 @@ import (
 
 type Config struct {
 	Debug           bool          `split_words:"true" default:"true"`
-	LoggerUseJson   bool          `split_words:"true" default:"true"`
 	RefreshInterval time.Duration `split_words:"true" default:"5s"`
 }
 

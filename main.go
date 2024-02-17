@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"github.com/anvouk/veryfreshpod/app"
+	"go.uber.org/zap"
 	appsV1 "k8s.io/api/apps/v1"
 	"os"
 	"os/signal"
@@ -12,6 +13,9 @@ import (
 func main() {
 	config := app.NewConfig()
 	logger := app.NewSugaredLogger(config)
+	defer func(logger *zap.SugaredLogger) {
+		_ = logger.Sync()
+	}(logger)
 
 	logger.Infof("veryfreshpod starting")
 	logger.Infof("debug mode: %v", config.Debug)
@@ -41,28 +45,24 @@ func main() {
 
 	if err := k8s.RegisterWatchForChanges(config, &app.K8sWatcher{
 		OnAddDeployment: func(deployment *appsV1.Deployment) {
-			logger.Infow("added deployment",
-				"name", deployment.Name, "namespace", deployment.Namespace)
+			logger.Infow("added deployment", "name", deployment.Name, "namespace", deployment.Namespace)
 			containers := deployment.Spec.Template.Spec.Containers
 			for _, container := range containers {
 				logger.Infow("found images", "image", container.Image, "name", container.Name)
 			}
 		},
 		OnRemoveDeployment: func(deployment *appsV1.Deployment) {
-			logger.Infow("removed deployment",
-				"name", deployment.Name, "namespace", deployment.Namespace)
+			logger.Infow("removed deployment", "name", deployment.Name, "namespace", deployment.Namespace)
 		},
 		OnAddStatefulSet: func(statefulSet *appsV1.StatefulSet) {
-			logger.Infow("added deployment",
-				"name", statefulSet.Name, "namespace", statefulSet.Namespace)
+			logger.Infow("added deployment", "name", statefulSet.Name, "namespace", statefulSet.Namespace)
 			containers := statefulSet.Spec.Template.Spec.Containers
 			for _, container := range containers {
 				logger.Infow("found images", "image", container.Image, "name", container.Name)
 			}
 		},
 		OnRemoveStatefulSet: func(statefulSet *appsV1.StatefulSet) {
-			logger.Infow("removed statefulSet",
-				"name", statefulSet.Name, "namespace", statefulSet.Namespace)
+			logger.Infow("removed statefulSet", "name", statefulSet.Name, "namespace", statefulSet.Namespace)
 		},
 	}); err != nil {
 		logger.Fatalw("failed registering callbacks for k8s watcher", "error", err)

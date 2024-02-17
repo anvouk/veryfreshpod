@@ -14,7 +14,7 @@ import (
 	"strconv"
 )
 
-const minSupportedVersionMinor int = 20
+const minSupportedVersionMinor int = 24
 
 type K8s struct {
 	logger *zap.SugaredLogger
@@ -89,10 +89,11 @@ func (k8s *K8s) RegisterWatchForChanges(config *Config, watcher *K8sWatcher) err
 		return errors.New("invalid arg: watcher is nil")
 	}
 
+	var err error
 	coreInformers := informers.NewSharedInformerFactory(k8s.client, config.RefreshInterval)
 
 	// Deployments
-	coreInformers.Apps().V1().Deployments().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, err = coreInformers.Apps().V1().Deployments().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			deployment, ok := obj.(*appsV1.Deployment)
 			if !ok {
@@ -114,9 +115,12 @@ func (k8s *K8s) RegisterWatchForChanges(config *Config, watcher *K8sWatcher) err
 			}
 		},
 	})
+	if err != nil {
+		return err
+	}
 
 	// StatefulSets
-	coreInformers.Apps().V1().StatefulSets().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, err = coreInformers.Apps().V1().StatefulSets().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			statefulSet, ok := obj.(*appsV1.StatefulSet)
 			if !ok {
@@ -138,6 +142,9 @@ func (k8s *K8s) RegisterWatchForChanges(config *Config, watcher *K8sWatcher) err
 			}
 		},
 	})
+	if err != nil {
+		return err
+	}
 
 	k8s.coreInformers = coreInformers
 	return nil
