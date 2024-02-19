@@ -44,14 +44,6 @@ func main() {
 	}
 
 	store := app.NewStore(logger, docker, k8s)
-	images, err := docker.GetAllImages(ctx)
-	if err != nil {
-		logger.Fatalw("failed getting docker images", "error", err)
-	}
-
-	for _, image := range images {
-		store.NewDockerImage(ctx, image)
-	}
 
 	err = docker.WatchForImagesChanges(ctx, &app.DockerImagesWatcher{
 		OnNewImage: func(imageName string, imageTag string) {
