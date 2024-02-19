@@ -46,6 +46,8 @@ metadata:
   labels:
     app: veryfreshpod
 spec:
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: veryfreshpod
@@ -57,7 +59,7 @@ spec:
       terminationGracePeriodSeconds: 5
       containers:
         - name: veryfreshpod
-          image: test:latest
+          image: andy414/veryfreshpod:latest
           imagePullPolicy: IfNotPresent
           envFrom:
             - configMapRef:
