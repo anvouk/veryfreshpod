@@ -29,6 +29,11 @@ func main() {
 		cancel()
 	}()
 
+	docker, err := app.NewDockerClient(logger, ctx)
+	if err != nil {
+		logger.Fatalw("failed creating docker client", "error", err)
+	}
+
 	k8s, err := app.NewK8sClient(logger)
 	if err != nil {
 		logger.Fatalw("failed creating k8s client", "error", err)
@@ -38,31 +43,46 @@ func main() {
 		logger.Fatalw("unsupported k8s version or connection failure", "error", err)
 	}
 
-	_, err = app.NewDockerClient(logger, ctx)
+	store := app.NewStore(logger, docker, k8s)
+	images, err := docker.GetAllImages(ctx)
 	if err != nil {
-		logger.Fatalw("failed creating docker client", "error", err)
+		logger.Fatalw("failed getting docker images", "error", err)
+	}
+
+	for _, image := range images {
+		store.NewDockerImage(ctx, image)
+	}
+
+	err = docker.WatchForImagesChanges(ctx, &app.DockerImagesWatcher{
+		OnNewImage: func(imageName string, imageTag string) {
+			logger.Debugw("new docker image", "imageName", imageName, "imageTag", imageTag)
+			store.NewDockerImage(ctx, imageName)
+		},
+		OnRemovedImage: func(imageName string, imageTag string) {
+			logger.Debugw("removed docker image", "imageName", imageName, "imageTag", imageTag)
+			store.RemoveDockerImage(imageName)
+		},
+	})
+	if err != nil {
+		logger.Fatalw("failed watching docker for images changes", "error", err)
 	}
 
 	if err := k8s.RegisterWatchForChanges(config, &app.K8sWatcher{
 		OnAddDeployment: func(deployment *appsV1.Deployment) {
-			logger.Infow("added deployment", "name", deployment.Name, "namespace", deployment.Namespace)
-			containers := deployment.Spec.Template.Spec.Containers
-			for _, container := range containers {
-				logger.Infow("found images", "image", container.Image, "name", container.Name)
-			}
+			logger.Debugw("added deployment", "name", deployment.Name, "namespace", deployment.Namespace)
+			store.NewK8sDeployment(deployment)
 		},
 		OnRemoveDeployment: func(deployment *appsV1.Deployment) {
-			logger.Infow("removed deployment", "name", deployment.Name, "namespace", deployment.Namespace)
+			logger.Debugw("removed deployment", "name", deployment.Name, "namespace", deployment.Namespace)
+			store.RemoveK8sDeployment(deployment)
 		},
 		OnAddStatefulSet: func(statefulSet *appsV1.StatefulSet) {
-			logger.Infow("added deployment", "name", statefulSet.Name, "namespace", statefulSet.Namespace)
-			containers := statefulSet.Spec.Template.Spec.Containers
-			for _, container := range containers {
-				logger.Infow("found images", "image", container.Image, "name", container.Name)
-			}
+			logger.Debugw("added statefulSet", "name", statefulSet.Name, "namespace", statefulSet.Namespace)
+			store.NewK8sStatefulSet(statefulSet)
 		},
 		OnRemoveStatefulSet: func(statefulSet *appsV1.StatefulSet) {
-			logger.Infow("removed statefulSet", "name", statefulSet.Name, "namespace", statefulSet.Namespace)
+			logger.Debugw("removed statefulSet", "name", statefulSet.Name, "namespace", statefulSet.Namespace)
+			store.RemoveK8sStatefulSet(statefulSet)
 		},
 	}); err != nil {
 		logger.Fatalw("failed registering callbacks for k8s watcher", "error", err)

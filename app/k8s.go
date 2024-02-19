@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"go.uber.org/zap"
 	appsV1 "k8s.io/api/apps/v1"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -159,5 +161,33 @@ func (k8s *K8s) Run(ctx context.Context) error {
 	k8s.coreInformers.WaitForCacheSync(stopCh)
 	k8s.coreInformers.Start(stopCh)
 
+	return nil
+}
+
+func (k8s *K8s) ReplaceImageForStatefulset(ctx context.Context, namespace string, statefulsetName string, containerName string, newImageName string) error {
+	k8s.logger.Infow("replacing statefulset image", "namespace", namespace, "statefulsetName", statefulsetName,
+		"containerName", containerName, "newImageName", newImageName)
+
+	patchData := []byte(fmt.Sprintf("{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"%s\",\"image\":\"%s\"}]}}}}", containerName, newImageName))
+	_, err := k8s.client.AppsV1().StatefulSets(namespace).Patch(ctx, statefulsetName, types.StrategicMergePatchType, patchData, v1.PatchOptions{})
+	if err != nil {
+		return err
+	}
+
+	k8s.logger.Debugw("container patched sucessfully", "containerName", containerName, "newImageName", newImageName)
+	return nil
+}
+
+func (k8s *K8s) ReplaceImageForDeployment(ctx context.Context, namespace string, deploymentName string, containerName string, newImageName string) error {
+	k8s.logger.Infow("replacing deployment image", "namespace", namespace, "deploymentName", deploymentName,
+		"containerName", containerName, "newImageName", newImageName)
+
+	patchData := []byte(fmt.Sprintf("{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"%s\",\"image\":\"%s\"}]}}}}", containerName, newImageName))
+	_, err := k8s.client.AppsV1().Deployments(namespace).Patch(ctx, deploymentName, types.StrategicMergePatchType, patchData, v1.PatchOptions{})
+	if err != nil {
+		return err
+	}
+
+	k8s.logger.Debugw("container patched sucessfully", "containerName", containerName, "newImageName", newImageName)
 	return nil
 }

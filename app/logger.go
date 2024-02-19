@@ -10,11 +10,9 @@ func NewSugaredLogger(config *Config) *zap.SugaredLogger {
 	var err error
 	if config.Debug {
 		devConfig := zap.NewDevelopmentConfig()
-		devConfig.Encoding = "console"
 		baseLogger, err = devConfig.Build()
 	} else {
 		prodConfig := zap.NewProductionConfig()
-		prodConfig.Encoding = "console"
 		baseLogger, err = prodConfig.Build()
 	}
 	if err != nil {
