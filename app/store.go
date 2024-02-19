@@ -7,6 +7,7 @@ import (
 	"github.com/emirpasic/gods/v2/maps/hashmap"
 	"go.uber.org/zap"
 	v1 "k8s.io/api/apps/v1"
+	"os"
 	"strings"
 )
 
@@ -60,8 +61,9 @@ func (s *Store) NewDockerImage(ctx context.Context, imageName string) {
 				splittedVal := strings.Split(value, "|")
 				err := s.k8s.ReplaceImageForStatefulset(ctx, splittedVal[0], splittedVal[1], splittedVal[2], imageName)
 				if err != nil {
-					// TODO: handler desync
 					s.logger.Errorw("failed changing statefulset image", "error", err)
+					// TODO: better way to handle desync?
+					os.Exit(1)
 				}
 			})
 			// update our image index map
@@ -74,8 +76,9 @@ func (s *Store) NewDockerImage(ctx context.Context, imageName string) {
 				splittedVal := strings.Split(value, "|")
 				err := s.k8s.ReplaceImageForDeployment(ctx, splittedVal[0], splittedVal[1], splittedVal[2], imageName)
 				if err != nil {
-					// TODO: handler desync
 					s.logger.Errorw("failed changing deployment image", "error", err)
+					// TODO: better way to handle desync?
+					os.Exit(1)
 				}
 			})
 			// update our image index map
